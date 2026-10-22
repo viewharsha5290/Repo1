@@ -120,7 +120,7 @@ canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-act
       <button class="tool" id="tool-blaster" data-tool="blaster" aria-pressed="false">Blaster</button>
       <button class="tool" id="tool-hammer" data-tool="hammer" aria-pressed="false">Hammer</button>
       <button class="tool" id="tool-plunger" data-tool="plunger" aria-pressed="false">Plunger</button>
-      <button class="tool" id="tool-catapult" data-tool="catapult" aria-pressed="false">Catapult</button>
+      <button class="tool" id="tool-cannon" data-tool="cannon" aria-pressed="false">Cannon</button>
     </div>
     <div class="items" id="items" role="group" aria-label="Choose what to throw"></div>
     <div class="actions">
@@ -148,11 +148,12 @@ const TOOLS = {
   blaster: { hit: 5,  bull: 15, hint: "Tap where you want to shoot" },
   hammer:  { hit: 8,  bull: 15, hint: "Tap the face to bonk it" },
   plunger: { hit: 12, bull: 30, hint: "Slide to line up, let go to fire" },
-  catapult:{ hit: 15, bull: 35, hint: "Hold to charge, slide to aim, let go" },
+  cannon:  { hit: 15, bull: 35, hint: "Hold to charge, slide to aim, let go" },
 };
 let tool = "sling", aim = -Math.PI / 2, recoil = 0, hammers = [];
 const plg = { x: 0, holding: false, phase: "idle", u: 0, id: "pie" }; // plunger
-const cat = { x: 0, charging: false, power: 0, dir: 1, arm: 0, yaw: 0 }; // catapult
+const can = { x: 0, charging: false, power: 0, dir: 1, kick: 0, yaw: 0, elev: .5 }; // cannon
+let smokes = [];
 
 const stage = document.getElementById("stage");
 const cv = document.getElementById("game");
@@ -387,10 +388,10 @@ function sfx(kind, item) {
     o.connect(v).connect(a.destination); o.start(t); o.stop(t + .12);
   } else if (kind === "boing") {
     tone(a, t, .3, "triangle", 160, 520, .22, 40);
-  } else if (kind === "thunk") {
-    noise(a, t, .12, "lowpass", 500, 150, .6, 1.5);
-    tone(a, t, .12, "sine", 110, 50, .4);
-    noise(a, t + .02, .35, "bandpass", 900, 2400, .12, 1);
+  } else if (kind === "boom") {
+    noise(a, t, .5, "lowpass", 600, 70, .8, 1.8);
+    tone(a, t, .4, "sine", 75, 32, .6);
+    noise(a, t, .05, "highpass", 2500, 1500, .25, 1);
   } else if (kind === "launch") {
     const o = a.createOscillator(), v = a.createGain();
     o.type = "triangle"; o.frequency.setValueAtTime(520, t); o.frequency.exponentialRampToValueAtTime(140, t + .15);
@@ -472,9 +473,9 @@ cv.addEventListener("pointerdown", e => {
     if (plg.phase !== "idle") return;
     cv.setPointerCapture(e.pointerId);
     plg.holding = true; plg.x = clamp(p.x, 30, W - 30);
-  } else if (tool === "catapult") {
+  } else if (tool === "cannon") {
     cv.setPointerCapture(e.pointerId);
-    Object.assign(cat, { charging: true, power: 0, dir: 1, x: clamp(p.x, 20, W - 20) });
+    Object.assign(can, { charging: true, power: 0, dir: 1, x: clamp(p.x, 20, W - 20) });
   } else {
     hammers.push({ x: p.x, y: p.y, u: 0, done: false, fade: 0.25, id: current });
     reload = 0.35;
@@ -483,7 +484,7 @@ cv.addEventListener("pointerdown", e => {
 cv.addEventListener("pointermove", e => {
   if (tool === "blaster" && state.phase === "playing") aimAt(point(e));
   if (plg.holding) plg.x = clamp(point(e).x, 30, W - 30);
-  if (cat.charging) cat.x = clamp(point(e).x, 20, W - 20);
+  if (can.charging) can.x = clamp(point(e).x, 20, W - 20);
   if (!drag) return;
   const p = point(e); let dx = p.x - drag.sx, dy = p.y - drag.sy;
   const m = Math.hypot(dx, dy), mp = maxPull();
@@ -497,13 +498,15 @@ const release = () => {
     if (state.phase === "playing") { plg.phase = "out"; plg.u = 0; plg.id = current; reload = 0.5; sfx("boing"); }
     return;
   }
-  if (cat.charging) {
-    cat.charging = false;
+  if (can.charging) {
+    can.charging = false;
     if (state.phase !== "playing") return;
-    const top = counterY() - 60, landY = top - cat.power * (top - H * 0.04);
-    shots.push({ id: current, tool: "catapult", sx: W / 2 + cat.yaw, sy: counterY() - 112, tx: cat.x, ty: landY, u: 0,
+    const top = counterY() - 60, landY = top - can.power * (top - H * 0.04);
+    const m = cannonGeom(0);
+    for (let i = 0; i < 7; i++) smokes.push({ x: m.mx + rand(-10, 10), y: m.my - rand(0, 14), r: rand(8, 14), vx: rand(-25, 25), vy: rand(-50, -20), life: rand(.6, 1) });
+    shots.push({ id: current, tool: "cannon", sx: m.mx, sy: m.my - 6, tx: can.x, ty: landY, u: 0,
       T: 0.8, arc: H * 0.32, spin: rand(-10, 10) });
-    cat.arm = 1; reload = 0.6; sfx("thunk");
+    can.kick = 1; reload = 0.6; sfx("boom");
     return;
   }
   if (!drag) return;
@@ -516,7 +519,7 @@ const release = () => {
   reload = 0.28; sfx("launch");
 };
 cv.addEventListener("pointerup", release);
-cv.addEventListener("pointercancel", () => { drag = null; plg.holding = false; cat.charging = false; });
+cv.addEventListener("pointercancel", () => { drag = null; plg.holding = false; can.charging = false; });
 
 function award(bull, t) {
   state.hits++; state.streak++;
@@ -572,8 +575,8 @@ function cleanUp() {
 function startRound() {
   audio(); ac && ac.state === "suspended" && ac.resume();
   Object.assign(state, { score: 0, throws: 0, hits: 0, streak: 0, phase: "playing", timeLeft: ROUND, lastTick: 99 });
-  shots = []; pops = []; hammers = []; cleanUp();
-  Object.assign(plg, { holding: false, phase: "idle", u: 0 }); Object.assign(cat, { charging: false, arm: 0 });
+  shots = []; pops = []; hammers = []; smokes = []; cleanUp();
+  Object.assign(plg, { holding: false, phase: "idle", u: 0 }); Object.assign(can, { charging: false, kick: 0 });
   $("overlay").hidden = true; hud();
 }
 function finishRound() {
@@ -598,7 +601,7 @@ function tickClock(dt) {
       state.lastTick = sec; hud();
       if (sec <= 5 && sec > 0) sfx("tick");
     }
-    if (state.timeLeft === 0) { state.phase = "ending"; drag = null; plg.holding = false; cat.charging = false; sfx("buzz"); }
+    if (state.timeLeft === 0) { state.phase = "ending"; drag = null; plg.holding = false; can.charging = false; sfx("buzz"); }
   }
   // let throws already in the air land before showing results
   if (state.phase === "ending" && shots.length === 0 && hammers.every(h => h.done) && plg.phase !== "out") finishRound();
@@ -615,12 +618,13 @@ function frame(now) {
   face.squash = Math.max(0, face.squash - dt * 4); face.flash = Math.max(0, face.flash - dt * 3);
   shake = Math.max(0, shake - dt * 30);
   face.stars = Math.max(0, face.stars - dt); recoil = Math.max(0, recoil - dt * 6);
-  if (cat.charging) {
-    cat.power += cat.dir * dt * 1.1;
-    if (cat.power >= 1) { cat.power = 1; cat.dir = -1; } else if (cat.power <= 0) { cat.power = 0; cat.dir = 1; }
+  if (can.charging) {
+    can.power += can.dir * dt * 1.1;
+    if (can.power >= 1) { can.power = 1; can.dir = -1; } else if (can.power <= 0) { can.power = 0; can.dir = 1; }
   }
-  cat.arm = Math.max(0, cat.arm - dt * 2.2);
-  if (cat.charging) cat.yaw = clamp((cat.x - W / 2) * 0.2, -24, 24);
+  can.kick = Math.max(0, can.kick - dt * 2.2);
+  if (can.charging) { can.yaw = clamp((can.x - W / 2) * 0.2, -24, 24); can.elev = .35 + can.power * .65; }
+  smokes = smokes.filter(m => { m.life -= dt; m.x += m.vx * dt; m.y += m.vy * dt; m.r += 18 * dt; return m.life > 0; });
   if (plg.phase === "out") {
     plg.u += dt / 0.16;
     if (plg.u >= 1) { plg.u = 1; plg.phase = "back"; land({ id: plg.id, tool: "plunger", tx: plg.x, ty: faceY() }); }
@@ -690,7 +694,7 @@ function draw(R) {
   if (tool === "sling") drawSling(p);
   else if (tool === "blaster") drawBlaster(ctx, pivot(), aim, recoil, reload ? null : current);
   else if (tool === "plunger") drawPlunger();
-  else if (tool === "catapult") drawCatapult();
+  else if (tool === "cannon") drawCannon();
   else if (!hammers.some(h => !h.done)) drawHammer(ctx, p.x - 24, p.y - 6, 0, 1, reload ? null : current);
   for (const h of hammers) drawHammer(ctx, h.x, h.y, h.u, h.done ? Math.max(0, h.fade / 0.25) : 1, h.done ? null : h.id);
 
@@ -709,7 +713,7 @@ function draw(R) {
   ctx.globalAlpha = 1;
   if (state.phase === "playing" && state.throws === 0 && !drag) {
     ctx.font = "600 14px Rubik, system-ui, sans-serif"; ctx.fillStyle = "#fff6e6";
-    ctx.fillText(TOOLS[tool].hint, W / 2, p.y - 70);
+    ctx.fillText(TOOLS[tool].hint, W / 2, Math.min(p.y - 70, counterY() - 160));
   }
   ctx.restore();
 }
@@ -778,39 +782,61 @@ function drawPlunger() {
   if (plg.phase !== "back") drawItem(ctx, x, top - 12, 1.4, plg.phase === "out" ? plg.id : current, 0);
 }
 
-// Wooden catapult seen from behind, facing the target. The arm swings up and away from the
-// player toward the face; phi is the arm's tilt (0 = straight up, larger = pulled back toward you).
-function drawCatapult() {
-  const cx = W / 2, by = counterY(), py = by - 40, L = 72;
-  if (cat.charging) dashedLine(cat.x, by - 150, cat.x, 50);
-  const loadedPhi = 2.0 + (cat.charging ? cat.power * .3 : 0), firedPhi = -0.12;
-  const swing = cat.arm > .75 ? (1 - cat.arm) / .25 : cat.arm / .75;
-  const phi = loadedPhi + (firedPhi - loadedPhi) * swing;
-  const ex = cx + cat.yaw * Math.cos(phi), ey = py - L * Math.cos(phi), s = 1 + .35 * Math.sin(phi);
+// Toy cannon seen from behind, pointing at the target. Charging tilts the barrel up (the
+// muzzle rises and looks farther away), sliding turns it, and firing kicks it back.
+function cannonGeom(kick = 0) {
+  const cx = W / 2, by = counterY(), drop = kick * 10;
+  const bx = cx, byy = by - 34 + drop, len = 46 + 50 * can.elev;
+  return { bx, by: byy, mx: cx + can.yaw * 1.6, my: byy - len - drop * .4 };
+}
+function drawCannon() {
+  const cx = W / 2, by = counterY();
+  if (can.charging) dashedLine(can.x, by - 160, can.x, 50);
+  const g = cannonGeom(can.kick), ang = Math.atan2(g.my - g.by, g.mx - g.bx), nx = -Math.sin(ang), ny = Math.cos(ang);
   ctx.lineCap = "round";
-  // frame: two uprights joined by the stop bar the arm hits
-  ctx.strokeStyle = "#6b3f26"; ctx.lineWidth = 8;
-  ctx.beginPath(); ctx.moveTo(cx - 46, by - 8); ctx.lineTo(cx - 36, by - 116); ctx.moveTo(cx + 46, by - 8); ctx.lineTo(cx + 36, by - 116); ctx.stroke();
-  ctx.fillStyle = "#83502f"; rrect(ctx, cx - 44, by - 122, 88, 10, 4);
-  ctx.fillStyle = "#83502f"; rrect(ctx, cx - 54, by - 14, 108, 12, 4);
-  for (const wx of [cx - 56, cx + 56]) {
-    ctx.fillStyle = "#3b2416"; ctx.beginPath(); ctx.ellipse(wx, by + 2, 7, 16, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = "#ffc83d"; ctx.fillRect(wx - 1.5, by - 12, 3, 28);
+  // wheels, seen edge-on from behind
+  for (const wx of [cx - 50, cx + 50]) {
+    ctx.fillStyle = "#e0573b"; ctx.beginPath(); ctx.ellipse(wx, by - 16, 9, 28, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffc83d"; ctx.beginPath(); ctx.ellipse(wx, by - 16, 3, 22, 0, 0, 7); ctx.fill();
   }
-  ctx.strokeStyle = "#3b2416"; ctx.lineWidth = 7;
-  ctx.beginPath(); ctx.moveTo(cx - 42, py); ctx.lineTo(cx + 42, py); ctx.stroke();
-  // arm and bucket
-  ctx.strokeStyle = "#a5683d"; ctx.lineWidth = 9;
-  ctx.beginPath(); ctx.moveTo(cx, py); ctx.lineTo(ex, ey); ctx.stroke();
-  ctx.fillStyle = "#6b3f26"; ctx.beginPath(); ctx.ellipse(ex, ey, 16 * s, 9 * s, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = "#3b2416"; ctx.beginPath(); ctx.ellipse(ex, ey - 1, 11 * s, 5 * s, 0, 0, 7); ctx.fill();
-  if (!reload) drawItem(ctx, ex, ey - 8 * s, s, current, 0);
-  ctx.fillStyle = "#ffc83d"; ctx.beginPath(); ctx.arc(cx, py, 5, 0, 7); ctx.fill();
-  if (cat.charging) {
+  // carriage
+  ctx.fillStyle = "#83502f";
+  ctx.beginPath(); ctx.moveTo(cx - 44, by - 2); ctx.lineTo(cx + 44, by - 2); ctx.lineTo(cx + 32, by - 36); ctx.lineTo(cx - 32, by - 36); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#6b3f26"; ctx.fillRect(cx - 50, by - 20, 100, 7);
+  // barrel: wide breech near you, narrow muzzle far away
+  const rb = 22, rm = 13;
+  ctx.fillStyle = "#2a6f7c"; ctx.beginPath();
+  ctx.moveTo(g.bx + nx * rb, g.by + ny * rb); ctx.lineTo(g.mx + nx * rm, g.my + ny * rm);
+  ctx.lineTo(g.mx - nx * rm, g.my - ny * rm); ctx.lineTo(g.bx - nx * rb, g.by - ny * rb); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,.22)"; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(g.bx + nx * rb * .5, g.by + ny * rb * .5); ctx.lineTo(g.mx + nx * rm * .5, g.my + ny * rm * .5); ctx.stroke();
+  for (const f of [.35, .7]) {
+    const x = g.bx + (g.mx - g.bx) * f, y = g.by + (g.my - g.by) * f, r = rb + (rm - rb) * f + 2;
+    ctx.strokeStyle = "#ffc83d"; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(x + nx * r, y + ny * r); ctx.lineTo(x - nx * r, y - ny * r); ctx.stroke();
+  }
+  // muzzle opening with the loaded item peeking out
+  ctx.fillStyle = "#ffc83d"; ctx.beginPath(); ctx.ellipse(g.mx, g.my, rm + 3, 8, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = "#0f252b"; ctx.beginPath(); ctx.ellipse(g.mx, g.my, rm - 2, 5, 0, 0, 7); ctx.fill();
+  if (!reload) drawItem(ctx, g.mx, g.my - 6, .8, current, 0);
+  if (can.kick > .8) {
+    ctx.globalAlpha = (can.kick - .8) * 5;
+    drawStar(ctx, g.mx, g.my - 10, 26);
+    ctx.globalAlpha = 1;
+  }
+  // breech end faces you
+  ctx.fillStyle = "#1f5a65"; ctx.beginPath(); ctx.arc(g.bx, g.by, rb, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#ffc83d"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(g.bx, g.by, rb - 3, 0, 7); ctx.stroke();
+  ctx.fillStyle = "#ffc83d"; ctx.beginPath(); ctx.arc(g.bx, g.by + 2, 7, 0, 7); ctx.fill();
+  for (const s of smokes) {
+    ctx.fillStyle = `rgba(230,236,236,${Math.max(0, s.life) * .55})`;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 7); ctx.fill();
+  }
+  if (can.charging) {
     const mx = cx + 74, my = by - 110, mh = 90;
     ctx.fillStyle = "rgba(15,37,43,.8)"; rrect(ctx, mx - 3, my - 3, 18, mh + 6, 6);
-    ctx.fillStyle = cat.power > .85 ? "#ff7a5c" : "#ffc83d";
-    rrect(ctx, mx, my + mh * (1 - cat.power), 12, mh * cat.power, 4);
+    ctx.fillStyle = can.power > .85 ? "#ff7a5c" : "#ffc83d";
+    rrect(ctx, mx, my + mh * (1 - can.power), 12, mh * can.power, 4);
   }
 }
 
@@ -860,7 +886,7 @@ const comicBtn = document.getElementById("comic");
 comicBtn.onclick = () => { comic = !comic; comicBtn.setAttribute("aria-pressed", comic); renderFace(); };
 document.getElementById("clean").onclick = cleanUp;
 document.querySelectorAll(".tool").forEach(b => b.onclick = () => {
-  tool = b.dataset.tool; drag = null; aim = -Math.PI / 2; plg.holding = false; cat.charging = false;
+  tool = b.dataset.tool; drag = null; aim = -Math.PI / 2; plg.holding = false; can.charging = false;
   document.querySelectorAll(".tool").forEach(t => t.setAttribute("aria-pressed", t === b));
 });
 $("start").onclick = startRound;

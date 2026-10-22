@@ -19,6 +19,7 @@
   color-scheme: dark;
 }
 html, body { height: 100%; }
+[hidden] { display: none !important; }
 body {
   background: var(--panel); color: var(--ink); font-family: var(--body);
   margin: 0; overflow: hidden; -webkit-user-select: none; user-select: none;
@@ -61,6 +62,24 @@ canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-act
 .btn[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--gold); color: var(--gold); }
 .btn:focus-visible, .chip:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .note { font-size: .7rem; color: var(--muted); text-align: center; margin: 0; }
+.stat.low b { color: #ff7a5c; }
+.overlay {
+  position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: center;
+  padding-block: 16px 24px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: linear-gradient(rgba(10, 26, 31, 0) 35%, rgba(10, 26, 31, .7));
+}
+.card {
+  width: 100%; max-width: 300px; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 22px 20px; border-radius: 18px; text-align: center;
+  background: var(--panel); border: 3px solid var(--gold);
+}
+.card h2 { font-family: var(--display); font-weight: 400; font-size: 1.5rem; color: var(--gold); margin: 0; text-wrap: balance; }
+.card p { margin: 0; color: var(--muted); font-size: .9rem; line-height: 1.4; }
+.big { font-family: var(--display); font-size: 3.2rem; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
+.badge { font-family: var(--display); font-size: .85rem; letter-spacing: .06em; color: var(--panel); background: var(--gold); padding: 4px 10px; border-radius: 999px; }
+.card .btn { flex: none; width: 100%; padding: 12px; font-size: 1rem; margin-top: 6px; }
 </style>
 
 <div class="app">
@@ -68,11 +87,23 @@ canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-act
     <h1 class="brand">Splat Booth</h1>
     <div class="stats">
       <div class="stat"><b id="score">0</b><span>Score</span></div>
-      <div class="stat"><b id="acc">–</b><span>Hit rate</span></div>
+      <div class="stat" id="timeStat"><b id="time">45</b><span>Time</span></div>
       <div class="stat"><b id="combo">x1</b><span>Combo</span></div>
+      <div class="stat"><b id="best">0</b><span>Best</span></div>
     </div>
   </header>
-  <main class="stage" id="stage"><canvas id="game" aria-label="Throwing range. Drag down from the slingshot and let go to throw."></canvas></main>
+  <main class="stage" id="stage">
+    <canvas id="game" aria-label="Throwing range. Drag down from the slingshot and let go to throw."></canvas>
+    <div class="overlay" id="overlay">
+      <div class="card" role="dialog" aria-labelledby="ovTitle">
+        <h2 id="ovTitle">45-second round</h2>
+        <div class="big" id="ovScore" hidden>0</div>
+        <span class="badge" id="ovBadge" hidden>New high score</span>
+        <p id="ovText">Splat the face as many times as you can before the clock runs out. Hit the center for 25 points and chain hits for a combo bonus.</p>
+        <button class="btn primary" id="start">Start round</button>
+      </div>
+    </div>
+  </main>
   <footer class="bar tray">
     <div class="items" id="items" role="group" aria-label="Choose what to throw"></div>
     <div class="actions">
@@ -191,7 +222,10 @@ const rest = () => ({ x: W / 2, y: H - 92 });
 const maxPull = () => clamp(H * 0.22, 80, 140);
 
 // ---------- Game state ----------
-const state = { score: 0, throws: 0, hits: 0, streak: 0, t: 0 };
+const ROUND = 45;
+const state = { score: 0, throws: 0, hits: 0, streak: 0, t: 0, phase: "ready", timeLeft: ROUND, lastTick: 99 };
+let best = 0;
+try { best = parseInt(localStorage.getItem("splat-best"), 10) || 0; } catch (e) {}
 const face = { x: 0, y: 0, wob: 0, wobV: 0, squash: 0, flash: 0 };
 let drag = null, shots = [], parts = [], pops = [], drips = [], shake = 0, reload = 0;
 
@@ -288,6 +322,11 @@ function sfx(kind) {
     o.type = "triangle"; o.frequency.setValueAtTime(520, t); o.frequency.exponentialRampToValueAtTime(140, t + .15);
     v.gain.setValueAtTime(.18, t); v.gain.exponentialRampToValueAtTime(.001, t + .16);
     o.connect(v).connect(a.destination); o.start(t); o.stop(t + .17);
+  } else if (kind === "tick" || kind === "buzz") {
+    const o = a.createOscillator(), v = a.createGain(), long = kind === "buzz";
+    o.type = long ? "sawtooth" : "square"; o.frequency.value = long ? 180 : 880;
+    v.gain.setValueAtTime(long ? .15 : .07, t); v.gain.exponentialRampToValueAtTime(.001, t + (long ? .6 : .08));
+    o.connect(v).connect(a.destination); o.start(t); o.stop(t + (long ? .62 : .09));
   } else {
     const len = a.sampleRate * .25, b = a.createBuffer(1, len, a.sampleRate), d = b.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
@@ -301,7 +340,7 @@ function sfx(kind) {
 // ---------- Throwing ----------
 function point(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
 cv.addEventListener("pointerdown", e => {
-  if (reload > 0) return;
+  if (reload > 0 || state.phase !== "playing") return;
   const p = point(e);
   if (p.y < H * 0.45) return; // grab from the lower part of the range
   audio(); ac && ac.state === "suspended" && ac.resume();
@@ -318,6 +357,7 @@ cv.addEventListener("pointermove", e => {
 const release = () => {
   if (!drag) return;
   const d = drag; drag = null;
+  if (state.phase !== "playing") return;
   if (Math.hypot(d.x, d.y) < 18 || d.y < 6) return; // too small or pulled the wrong way
   const p = rest(), to = predicted(d);
   shots.push({ id: current, sx: p.x + d.x, sy: p.y + d.y, tx: to.x, ty: to.y, u: 0,
@@ -355,11 +395,52 @@ function land(s) {
   hud();
 }
 
-const elScore = document.getElementById("score"), elAcc = document.getElementById("acc"), elCombo = document.getElementById("combo");
+const $ = id => document.getElementById(id);
+const elScore = $("score"), elTime = $("time"), elCombo = $("combo"), elBest = $("best"), timeStat = $("timeStat");
 function hud() {
   elScore.textContent = state.score;
-  elAcc.textContent = state.throws ? Math.round(state.hits / state.throws * 100) + "%" : "–";
+  elTime.textContent = Math.ceil(state.timeLeft);
+  timeStat.classList.toggle("low", state.phase === "playing" && state.timeLeft <= 10);
   elCombo.textContent = "x" + (state.streak >= 6 ? 3 : state.streak >= 3 ? 2 : 1);
+  elBest.textContent = best;
+}
+
+// ---------- Rounds ----------
+function cleanUp() {
+  sctx.clearRect(0, 0, FS, FS); drips = [];
+  if (wallCv) wallCv.getContext("2d").clearRect(0, 0, wallCv.width, wallCv.height);
+}
+function startRound() {
+  audio(); ac && ac.state === "suspended" && ac.resume();
+  Object.assign(state, { score: 0, throws: 0, hits: 0, streak: 0, phase: "playing", timeLeft: ROUND, lastTick: 99 });
+  shots = []; pops = []; cleanUp();
+  $("overlay").hidden = true; hud();
+}
+function finishRound() {
+  state.phase = "over";
+  const isBest = state.score > best;
+  if (isBest) { best = state.score; try { localStorage.setItem("splat-best", best); } catch (e) {} }
+  const acc = state.throws ? Math.round(state.hits / state.throws * 100) : 0;
+  $("ovTitle").textContent = "Time's up";
+  $("ovScore").textContent = state.score; $("ovScore").hidden = false;
+  $("ovBadge").hidden = !isBest || state.score === 0;
+  $("ovText").textContent = `${state.hits} hits from ${state.throws} throws (${acc}%). ` + (isBest ? "" : `High score: ${best}.`);
+  $("start").textContent = "Play again";
+  $("overlay").hidden = false; hud();
+  $("start").focus();
+}
+function tickClock(dt) {
+  if (state.phase === "playing") {
+    state.timeLeft = Math.max(0, state.timeLeft - dt);
+    const sec = Math.ceil(state.timeLeft);
+    if (sec !== state.lastTick) {
+      state.lastTick = sec; hud();
+      if (sec <= 5 && sec > 0) sfx("tick");
+    }
+    if (state.timeLeft === 0) { state.phase = "ending"; drag = null; sfx("buzz"); }
+  }
+  // let throws already in the air land before showing results
+  if (state.phase === "ending" && shots.length === 0) finishRound();
 }
 
 // ---------- Main loop ----------
@@ -381,6 +462,7 @@ function frame(now) {
   });
 
   shots = shots.filter(s => { s.u += dt / s.T; if (s.u >= 1) { land(s); return false; } return true; });
+  tickClock(dt);
   parts = parts.filter(p => { p.life -= dt; p.vy += 600 * dt; p.x += p.vx * dt; p.y += p.vy * dt; return p.life > 0; });
   pops = pops.filter(p => { p.life -= dt; p.y -= 40 * dt; return p.life > 0; });
 
@@ -452,7 +534,7 @@ function draw(R) {
     ctx.fillStyle = q.text === "MISS" ? "#a9c6c9" : "#ffc83d"; ctx.fillText(q.text, q.x, q.y);
   }
   ctx.globalAlpha = 1;
-  if (state.throws === 0 && !drag) {
+  if (state.phase === "playing" && state.throws === 0 && !drag) {
     ctx.font = "600 14px Rubik, system-ui, sans-serif"; ctx.fillStyle = "#fff6e6";
     ctx.fillText("Drag down from the slingshot, aim, let go", W / 2, p.y - 60);
   }
@@ -477,10 +559,8 @@ document.getElementById("file").addEventListener("change", e => {
 });
 const comicBtn = document.getElementById("comic");
 comicBtn.onclick = () => { comic = !comic; comicBtn.setAttribute("aria-pressed", comic); renderFace(); };
-document.getElementById("clean").onclick = () => {
-  sctx.clearRect(0, 0, FS, FS); drips = [];
-  wallCv.getContext("2d").clearRect(0, 0, wallCv.width, wallCv.height);
-};
+document.getElementById("clean").onclick = cleanUp;
+$("start").onclick = startRound;
 const soundBtn = document.getElementById("sound");
 soundBtn.onclick = () => { soundOn = !soundOn; soundBtn.setAttribute("aria-pressed", soundOn); soundBtn.textContent = soundOn ? "Sound on" : "Sound off"; };
 

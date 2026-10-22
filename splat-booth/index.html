@@ -476,7 +476,7 @@ cv.addEventListener("pointerdown", e => {
     cv.setPointerCapture(e.pointerId);
     Object.assign(cat, { charging: true, power: 0, dir: 1, x: clamp(p.x, 20, W - 20) });
   } else {
-    hammers.push({ x: p.x, y: p.y, u: 0, done: false, fade: 0.25 });
+    hammers.push({ x: p.x, y: p.y, u: 0, done: false, fade: 0.25, id: current });
     reload = 0.35;
   }
 });
@@ -524,23 +524,9 @@ function award(bull, t) {
   const pts = (bull ? TOOLS[t].bull : TOOLS[t].hit) * mult;
   state.score += pts; return pts;
 }
-function bonk(h) {
-  state.throws++;
-  const R = faceR(), dx = h.x - face.x, dy = h.y - face.y, dist = Math.hypot(dx, dy);
-  if (dist < R) {
-    const bull = dist < R * 0.33, pts = award(bull, "hammer");
-    face.squash = 1.8; face.wobV += (dx / R) * 10 + rand(-2, 2); face.stars = 1.4; face.flash = .6;
-    shake = reduceMotion ? 0 : 5;
-    pops.push({ x: h.x, y: h.y - R * .5, text: (bull ? "BIG BONK +" : "BONK +") + pts, life: 1 });
-    sfx("squeak");
-  } else {
-    state.streak = 0;
-    pops.push({ x: h.x, y: h.y - 20, text: "WHIFF", life: .8 });
-    sfx("miss");
-  }
-  hud();
-}
+// Thrown items, plunger pies and hammer smashes all end here.
 function land(s) {
+  const bonk = s.tool === "hammer";
   state.throws++;
   const R = faceR(), dx = s.tx - face.x, dy = s.ty - face.y, dist = Math.hypot(dx, dy);
   const color = ITEMS[s.id].main;
@@ -549,14 +535,16 @@ function land(s) {
     const lx = FS / 2 + dx / R * FS / 2, ly = FS / 2 + dy / R * FS / 2;
     paintSplat(sctx, lx, ly, FS * rand(.13, .18), s.id);
     for (let i = 0; i < 3; i++) drips.push({ x: lx + rand(-FS * .1, FS * .1), y: ly + FS * .08, left: rand(30, 90), v: rand(14, 32), w: rand(4, 8), color });
-    face.wobV += (dx / R) * 7 + rand(-2, 2); face.squash = 1; face.flash = 1;
+    face.wobV += (dx / R) * (bonk ? 10 : 7) + rand(-2, 2); face.squash = bonk ? 1.8 : 1; face.flash = 1;
+    if (bonk) { face.stars = 1.4; sfx("squeak"); }
     shake = reduceMotion ? 0 : 7;
-    pops.push({ x: s.tx, y: s.ty - R * .4, text: (bull ? "BULLSEYE +" : "SPLAT +") + pts, life: 1 });
+    const word = bonk ? (bull ? "BIG BONK +" : "BONK +") : (bull ? "BULLSEYE +" : "SPLAT +");
+    pops.push({ x: s.tx, y: s.ty - R * .4, text: word + pts, life: 1 });
     sfx("hit", s.id);
   } else {
     state.streak = 0;
     const g = wallCv.getContext("2d"); g.save(); g.scale(dpr, dpr); paintSplat(g, s.tx, s.ty, R * .28, s.id); g.restore();
-    pops.push({ x: s.tx, y: s.ty - 20, text: "MISS", life: .8 });
+    pops.push({ x: s.tx, y: s.ty - 20, text: bonk ? "WHIFF" : "MISS", life: .8 });
     sfx("miss", s.id);
   }
   for (let i = 0; i < 14; i++) {
@@ -640,7 +628,7 @@ function frame(now) {
     if (plg.u <= 0) { plg.u = 0; plg.phase = "idle"; }
   }
   hammers = hammers.filter(h => {
-    if (!h.done) { h.u += dt / 0.12; if (h.u >= 1) { h.u = 1; h.done = true; bonk(h); } }
+    if (!h.done) { h.u += dt / 0.12; if (h.u >= 1) { h.u = 1; h.done = true; land({ id: h.id, tool: "hammer", tx: h.x, ty: h.y }); } }
     else h.fade -= dt;
     return h.fade > 0;
   });
@@ -702,8 +690,8 @@ function draw(R) {
   else if (tool === "blaster") drawBlaster(ctx, pivot(), aim, recoil, reload ? null : current);
   else if (tool === "plunger") drawPlunger();
   else if (tool === "catapult") drawCatapult();
-  else if (!hammers.some(h => !h.done)) drawHammer(ctx, p.x - 24, p.y - 6, 0, 1);
-  for (const h of hammers) drawHammer(ctx, h.x, h.y, h.u, h.done ? Math.max(0, h.fade / 0.25) : 1);
+  else if (!hammers.some(h => !h.done)) drawHammer(ctx, p.x - 24, p.y - 6, 0, 1, reload ? null : current);
+  for (const h of hammers) drawHammer(ctx, h.x, h.y, h.u, h.done ? Math.max(0, h.fade / 0.25) : 1, h.done ? null : h.id);
 
   for (const s of shots) {
     const u = s.u, x = s.sx + (s.tx - s.sx) * u, y = s.sy + (s.ty - s.sy) * u - s.arc * 4 * u * (1 - u);
@@ -754,7 +742,7 @@ function drawBlaster(g, o, a, kick, loaded) {
 }
 
 // Squeaky foam mallet. u goes 0 (raised) to 1 (landed) and the head's front edge lands on (x, y).
-function drawHammer(g, x, y, u, alpha) {
+function drawHammer(g, x, y, u, alpha, item) {
   const px = x + 50, py = y + 62, hit = Math.atan2(y - py, x - px), L = Math.hypot(x - px, y - py);
   const th = hit + (1 - u * u) * 1.1;
   g.save(); g.globalAlpha = alpha; g.translate(px, py); g.rotate(th);
@@ -763,6 +751,7 @@ function drawHammer(g, x, y, u, alpha) {
   g.fillStyle = "#e0573b"; rrect(g, L - 17, 0, 34, 60, 10);
   g.fillStyle = "#ffc83d"; g.fillRect(L - 17, 14, 34, 7); g.fillRect(L - 17, 39, 34, 7);
   g.fillStyle = "rgba(255,255,255,.3)"; rrect(g, L - 12, 4, 8, 52, 4);
+  if (item) drawItem(g, L, -9, 1, item, 0); // the item rides on the striking face
   g.restore();
 }
 
@@ -864,7 +853,7 @@ document.getElementById("clean").onclick = cleanUp;
 document.querySelectorAll(".tool").forEach(b => b.onclick = () => {
   tool = b.dataset.tool; drag = null; aim = -Math.PI / 2; plg.holding = false; cat.charging = false;
   document.querySelectorAll(".tool").forEach(t => t.setAttribute("aria-pressed", t === b));
-  itemsEl.querySelectorAll(".chip").forEach(c => c.disabled = tool === "hammer" || tool === "plunger");
+  itemsEl.querySelectorAll(".chip").forEach(c => c.disabled = tool === "plunger");
 });
 $("start").onclick = startRound;
 $("share").onclick = shareScore;

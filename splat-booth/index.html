@@ -365,7 +365,7 @@ function drawItem(g, x, y, s, id, ang) {
 // ---------- Sound ----------
 let ac = null;
 function audio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } return ac; }
-function sfx(kind) {
+function sfx(kind, item) {
   const a = soundOn && audio(); if (!a) return;
   const t = a.currentTime;
   if (kind === "squeak") {
@@ -389,12 +389,48 @@ function sfx(kind) {
     v.gain.setValueAtTime(long ? .15 : .07, t); v.gain.exponentialRampToValueAtTime(.001, t + (long ? .6 : .08));
     o.connect(v).connect(a.destination); o.start(t); o.stop(t + (long ? .62 : .09));
   } else {
-    const len = a.sampleRate * .25, b = a.createBuffer(1, len, a.sampleRate), d = b.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
-    const s = a.createBufferSource(), f = a.createBiquadFilter(), v = a.createGain();
-    s.buffer = b; f.type = "lowpass"; f.frequency.value = kind === "hit" ? 1400 : 700;
-    v.gain.value = kind === "hit" ? .55 : .3;
-    s.connect(f).connect(v).connect(a.destination); s.start(t);
+    splatSound(a, t, item, kind === "hit" ? 1 : .5);
+  }
+}
+
+// Short building blocks for the splat sounds.
+function noise(a, t, dur, filter, f0, f1, gain, curve = 2.5) {
+  const len = Math.ceil(a.sampleRate * dur), b = a.createBuffer(1, len, a.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, curve);
+  const s = a.createBufferSource(), f = a.createBiquadFilter(), v = a.createGain();
+  s.buffer = b; f.type = filter; f.Q.value = 1.2;
+  f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  v.gain.value = gain;
+  s.connect(f).connect(v).connect(a.destination); s.start(t);
+}
+function tone(a, t, dur, type, f0, f1, gain, wobble = 0) {
+  const o = a.createOscillator(), v = a.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  if (wobble) {
+    const l = a.createOscillator(), lg = a.createGain();
+    l.frequency.value = 18; lg.gain.value = wobble; l.connect(lg).connect(o.frequency); l.start(t); l.stop(t + dur);
+  }
+  v.gain.setValueAtTime(gain, t); v.gain.exponentialRampToValueAtTime(.001, t + dur);
+  o.connect(v).connect(a.destination); o.start(t); o.stop(t + dur + .02);
+}
+function splatSound(a, t, item, k) {
+  if (item === "tomato") {        // wet squelch with a soft thud
+    noise(a, t, .28, "lowpass", 2200, 300, .6 * k, 2);
+    tone(a, t, .14, "sine", 140, 55, .35 * k);
+  } else if (item === "egg") {    // sharp shell crack, then a thin splat
+    noise(a, t, .03, "highpass", 3500, 2500, .5 * k, 1);
+    noise(a, t + .035, .025, "highpass", 3000, 2000, .35 * k, 1);
+    noise(a, t + .05, .2, "bandpass", 1800, 700, .45 * k, 2.5);
+  } else if (item === "pie") {    // soft, heavy fwump
+    noise(a, t, .35, "lowpass", 700, 150, .75 * k, 1.6);
+    tone(a, t, .22, "sine", 95, 45, .5 * k);
+  } else if (item === "slime") {  // wobbly gloop with a couple of bubbles
+    tone(a, t, .32, "sine", 420, 110, .35 * k, 60);
+    noise(a, t, .2, "lowpass", 900, 250, .3 * k, 2);
+    tone(a, t + .14, .06, "sine", 600, 900, .15 * k);
+    tone(a, t + .22, .05, "sine", 750, 1100, .12 * k);
+  } else {                        // hammer whiff and anything else
+    noise(a, t, .2, "lowpass", 900, 400, .3 * k);
   }
 }
 
@@ -479,12 +515,12 @@ function land(s) {
     face.wobV += (dx / R) * 7 + rand(-2, 2); face.squash = 1; face.flash = 1;
     shake = reduceMotion ? 0 : 7;
     pops.push({ x: s.tx, y: s.ty - R * .4, text: (bull ? "BULLSEYE +" : "SPLAT +") + pts, life: 1 });
-    sfx("hit");
+    sfx("hit", s.id);
   } else {
     state.streak = 0;
     const g = wallCv.getContext("2d"); g.save(); g.scale(dpr, dpr); paintSplat(g, s.tx, s.ty, R * .28, s.id); g.restore();
     pops.push({ x: s.tx, y: s.ty - 20, text: "MISS", life: .8 });
-    sfx("miss");
+    sfx("miss", s.id);
   }
   for (let i = 0; i < 14; i++) {
     const a = rand(0, 7), v = rand(80, 260);

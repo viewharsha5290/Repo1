@@ -18,6 +18,7 @@ python3 splat-booth/instant/build.py
 This rewrites `splat-booth-instant.zip`. Edit `../index.html`, never the copy in `dist/`.
 
 ## Getting it onto Facebook
+Images, listing text and the privacy policy link are ready in `LAUNCH.md`.
 You'll need a computer for these steps.
 
 1. **Create a developer account** at developers.facebook.com (free) and verify it.

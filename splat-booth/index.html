@@ -636,8 +636,9 @@ function tickClock(dt) {
 }
 
 // ---------- Main loop ----------
-let last = performance.now();
+let last = performance.now(), paused = false;
 function frame(now) {
+  if (paused) { last = now; requestAnimationFrame(frame); return; }
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   state.t += dt; reload = Math.max(0, reload - dt);
   const R = faceR();
@@ -723,7 +724,7 @@ function draw(R) {
   else if (tool === "blaster") drawBlaster(ctx, pivot(), aim, recoil, reload ? null : current);
   else if (tool === "plunger") drawPlunger();
   else if (tool === "cannon") drawCannon();
-  else if (!hammers.some(h => !h.done)) drawHammer(ctx, p.x - 24, p.y - 6, 0, 1, reload ? null : current);
+  else if (!hammers.length) drawHammer(ctx, p.x - 24, p.y - 6, 0, 1, reload ? null : current);
   for (const h of hammers) drawHammer(ctx, h.x, h.y, h.u, h.done ? Math.max(0, h.fade / 0.25) : 1, h.done ? null : h.id);
 
   for (const s of shots) {
@@ -917,7 +918,26 @@ document.querySelectorAll(".tool").forEach(b => b.onclick = () => {
   tool = b.dataset.tool; drag = null; aim = -Math.PI / 2; plg.holding = false; can.charging = false;
   document.querySelectorAll(".tool").forEach(t => t.setAttribute("aria-pressed", t === b));
 });
-$("start").onclick = startRound;
+$("start").onclick = () => (paused ? resumeGame() : startRound());
+
+// Pause when the player leaves (switches app, gets a call, or Facebook opens something on top).
+function pauseGame() {
+  if (state.phase !== "playing" || paused) return;
+  paused = true; drag = null; plg.holding = false; can.charging = false;
+  if (ac && ac.suspend) ac.suspend().catch(() => {});
+  $("ovTitle").textContent = "Paused";
+  $("ovScore").hidden = true; $("ovBadge").hidden = true; $("share").hidden = true; $("boardTip").hidden = true;
+  $("ovText").textContent = `${Math.ceil(state.timeLeft)} seconds left. Score so far: ${state.score}.`;
+  $("start").textContent = "Resume";
+  $("overlay").hidden = false;
+}
+function resumeGame() {
+  paused = false; last = performance.now();
+  if (ac && ac.resume) ac.resume().catch(() => {});
+  $("overlay").hidden = true;
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden) pauseGame(); });
+if (FB && typeof FB.onPause === "function") { try { FB.onPause(pauseGame); } catch (e) {} }
 $("share").onclick = shareScore;
 const soundBtn = document.getElementById("sound");
 soundBtn.onclick = () => { soundOn = !soundOn; soundBtn.setAttribute("aria-pressed", soundOn); soundBtn.textContent = soundOn ? "Sound on" : "Sound off"; };

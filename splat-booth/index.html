@@ -89,6 +89,22 @@ canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-act
 .big { font-family: var(--display); font-size: 3.2rem; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
 .badge { font-family: var(--display); font-size: .85rem; letter-spacing: .06em; color: var(--panel); background: var(--gold); padding: 4px 10px; border-radius: 999px; }
 .card .btn { flex: none; width: 100%; padding: 12px; font-size: 1rem; margin-top: 6px; }
+.card .tip { color: var(--gold); font-weight: 600; }
+/* Facebook leaderboard panel */
+.overlay.board { align-items: center; background: rgba(10, 26, 31, .8); }
+.board .card { max-height: 100%; overflow-y: auto; align-items: stretch; }
+.board-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.board-list li, .board-me {
+  display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 10px; background: var(--chip); text-align: left;
+}
+.board-list li.me, .board-me { box-shadow: inset 0 0 0 2px var(--gold); }
+.board-list .rank, .board-me .rank { font-family: var(--display); color: var(--muted); font-variant-numeric: tabular-nums; }
+.board-list li:nth-child(1) .rank { color: var(--gold); }
+.board-list li:nth-child(2) .rank { color: #c9d6d8; }
+.board-list li:nth-child(3) .rank { color: #d99a5e; }
+.board-list .who, .board-me .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.board-list .pts, .board-me .pts { font-family: var(--display); font-variant-numeric: tabular-nums; }
 </style>
 
 <div class="app">
@@ -111,6 +127,17 @@ canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-act
         <p id="ovText">Pick a tool and splat the face as many times as you can before the clock runs out. Center hits score extra, and hits in a row build a combo.</p>
         <button class="btn primary" id="start">Start round</button>
         <button class="btn" id="share" hidden>Share score</button>
+        <p class="tip" id="boardTip" hidden></p>
+        <button class="btn" id="boardOpen" hidden>Leaderboard</button>
+      </div>
+    </div>
+    <div class="overlay board" id="board" hidden>
+      <div class="card" role="dialog" aria-labelledby="boardTitle">
+        <h2 id="boardTitle">Leaderboard</h2>
+        <p id="boardStatus" role="status">Loading…</p>
+        <ol class="board-list" id="boardList"></ol>
+        <div class="board-me" id="boardMe" hidden></div>
+        <button class="btn" type="button" id="boardClose">Close</button>
       </div>
     </div>
   </main>
@@ -577,13 +604,14 @@ function startRound() {
   Object.assign(state, { score: 0, throws: 0, hits: 0, streak: 0, phase: "playing", timeLeft: ROUND, lastTick: 99 });
   shots = []; pops = []; hammers = []; smokes = []; cleanUp();
   Object.assign(plg, { holding: false, phase: "idle", u: 0 }); Object.assign(can, { charging: false, kick: 0 });
-  $("overlay").hidden = true; hud();
+  $("overlay").hidden = true; $("boardTip").hidden = true; hud();
 }
 function finishRound() {
   state.phase = "over";
   const isBest = state.score > best;
   if (isBest) { best = state.score; saveBest(best); }
   $("share").hidden = !fbHas("shareAsync") || state.score === 0;
+  postScore(state.score);
   const acc = state.throws ? Math.round(state.hits / state.throws * 100) : 0;
   $("ovTitle").textContent = "Time's up";
   $("ovScore").textContent = state.score; $("ovScore").hidden = false;
@@ -894,7 +922,72 @@ $("share").onclick = shareScore;
 const soundBtn = document.getElementById("sound");
 soundBtn.onclick = () => { soundOn = !soundOn; soundBtn.setAttribute("aria-pressed", soundOn); soundBtn.textContent = soundOn ? "Sound on" : "Sound off"; };
 
+// ---------- Facebook leaderboard ----------
+// Facebook stores and ranks the scores. The board must exist in the app dashboard under this
+// exact name (global, higher is better). Facebook keeps each player's best, so posting a lower
+// score changes nothing. Outside Facebook all of this stays hidden.
+const BOARD = "splat_booth_best";
+const boardOn = () => fbHas("getLeaderboardAsync");
+let boardPromise = null;
+function getBoard() {
+  if (!boardPromise) boardPromise = FB.getLeaderboardAsync(BOARD).catch(e => { boardPromise = null; throw e; });
+  return boardPromise;
+}
+function postScore(score) {
+  if (!boardOn() || score <= 0) return;
+  const tip = $("boardTip");
+  getBoard()
+    .then(lb => lb.setScoreAsync(score))
+    .then(entry => {
+      if (!entry || state.phase !== "over") return;
+      tip.textContent = `Leaderboard: you're #${entry.getRank()} with your best of ${entry.getScore()}.`;
+      tip.hidden = false;
+    })
+    .catch(() => {});
+}
+// Player names: SDK 8.0 (Zero Permissions) no longer gives them to the game, so rows say
+// "Player" unless the SDK still offers a name.
+function playerName(entry) {
+  try { const p = entry.getPlayer(); return (p && typeof p.getName === "function" && p.getName()) || "Player"; }
+  catch (e) { return "Player"; }
+}
+function playerId(entry) { try { return entry.getPlayer().getID(); } catch (e) { return null; } }
+function boardRow(el, entry, isMe) {
+  const rank = document.createElement("span"); rank.className = "rank"; rank.textContent = "#" + entry.getRank();
+  const who = document.createElement("span"); who.className = "who"; who.textContent = isMe ? "You" : playerName(entry);
+  const pts = document.createElement("b"); pts.className = "pts"; pts.textContent = entry.getScore();
+  el.textContent = ""; el.append(rank, who, pts);
+}
+async function openBoard() {
+  const list = $("boardList"), me = $("boardMe"), status = $("boardStatus");
+  list.textContent = ""; me.hidden = true; status.hidden = false; status.textContent = "Loading…";
+  $("board").hidden = false; $("boardClose").focus();
+  try {
+    const lb = await getBoard();
+    const [top, mine] = await Promise.all([
+      lb.getEntriesAsync(10, 0),
+      lb.getPlayerEntryAsync ? lb.getPlayerEntryAsync().catch(() => null) : null,
+    ]);
+    let myId = null; try { myId = FB.player.getID(); } catch (e) {}
+    status.hidden = top.length > 0;
+    status.textContent = "No scores yet. Finish a round to be first on the board.";
+    let meShown = false;
+    for (const entry of top) {
+      const isMe = myId && playerId(entry) === myId;
+      meShown = meShown || isMe;
+      const li = document.createElement("li"); if (isMe) li.className = "me";
+      boardRow(li, entry, isMe); list.append(li);
+    }
+    if (mine && mine.getScore() > 0 && !meShown) { boardRow(me, mine, true); me.hidden = false; }
+  } catch (e) {
+    status.textContent = "Couldn't load the leaderboard. Check your connection and try again.";
+  }
+}
+$("boardOpen").onclick = openBoard;
+$("boardClose").onclick = () => { $("board").hidden = true; };
+
 async function boot() {
+  $("boardOpen").hidden = !boardOn();
   best = await loadBest();
   new ResizeObserver(layout).observe(stage);
   layout(); renderFace(); hud();

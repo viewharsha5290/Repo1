@@ -109,6 +109,7 @@ canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-act
         <span class="badge" id="ovBadge" hidden>New high score</span>
         <p id="ovText">Pick a tool and splat the face as many times as you can before the clock runs out. Center hits score extra, and hits in a row build a combo.</p>
         <button class="btn primary" id="start">Start round</button>
+        <button class="btn" id="share" hidden>Share score</button>
       </div>
     </div>
   </main>
@@ -245,7 +246,37 @@ const maxPull = () => clamp(H * 0.22, 80, 140);
 const ROUND = 45;
 const state = { score: 0, throws: 0, hits: 0, streak: 0, t: 0, phase: "ready", timeLeft: ROUND, lastTick: 99 };
 let best = 0;
-try { best = parseInt(localStorage.getItem("splat-best"), 10) || 0; } catch (e) {}
+
+// ---------- Platform: Facebook Instant Games when available, plain browser otherwise ----------
+const FB = window.FBInstant || null;
+const fbHas = api => { try { return !!FB && FB.getSupportedAPIs().includes(api); } catch (e) { return false; } };
+async function loadBest() {
+  if (fbHas("player.getDataAsync")) {
+    try { const d = await FB.player.getDataAsync(["best"]); return d.best || 0; } catch (e) {}
+  }
+  try { return parseInt(localStorage.getItem("splat-best"), 10) || 0; } catch (e) { return 0; }
+}
+function saveBest(v) {
+  if (fbHas("player.setDataAsync")) FB.player.setDataAsync({ best: v }).catch(() => {});
+  try { localStorage.setItem("splat-best", v); } catch (e) {}
+}
+// The shared image is a score card, never the uploaded face, so nobody's photo gets posted.
+function scoreCard(score) {
+  const c = mk(960, 504), g = c.getContext("2d");
+  for (let x = 0, i = 0; x < 960; x += 60, i++) { g.fillStyle = i % 2 ? "#1d4b56" : "#153a43"; g.fillRect(x, 0, 60, 504); }
+  paintSplat(g, 150, 130, 70, "tomato"); paintSplat(g, 830, 380, 60, "egg"); paintSplat(g, 800, 110, 45, "slime");
+  g.textAlign = "center"; g.fillStyle = "#ffc83d"; g.font = '64px Bungee, "Arial Black", sans-serif';
+  g.fillText("SPLAT BOOTH", 480, 140);
+  g.fillStyle = "#fff6e6"; g.font = '600 34px Rubik, system-ui, sans-serif'; g.fillText("I scored", 480, 230);
+  g.font = '140px Bungee, "Arial Black", sans-serif'; g.fillText(score, 480, 370);
+  g.font = '600 30px Rubik, system-ui, sans-serif'; g.fillStyle = "#a9c6c9"; g.fillText("Can you beat it?", 480, 440);
+  return c.toDataURL("image/jpeg", 0.85);
+}
+function shareScore() {
+  if (!fbHas("shareAsync")) return;
+  FB.shareAsync({ intent: "SHARE", image: scoreCard(state.score), text: `I scored ${state.score} in Splat Booth. Can you beat it?`, data: { score: state.score } })
+    .catch(() => {});
+}
 const face = { x: 0, y: 0, wob: 0, wobV: 0, squash: 0, flash: 0, stars: 0 };
 let drag = null, shots = [], parts = [], pops = [], drips = [], shake = 0, reload = 0;
 
@@ -486,7 +517,8 @@ function startRound() {
 function finishRound() {
   state.phase = "over";
   const isBest = state.score > best;
-  if (isBest) { best = state.score; try { localStorage.setItem("splat-best", best); } catch (e) {} }
+  if (isBest) { best = state.score; saveBest(best); }
+  $("share").hidden = !fbHas("shareAsync") || state.score === 0;
   const acc = state.throws ? Math.round(state.hits / state.throws * 100) : 0;
   $("ovTitle").textContent = "Time's up";
   $("ovScore").textContent = state.score; $("ovScore").hidden = false;
@@ -697,11 +729,21 @@ document.querySelectorAll(".tool").forEach(b => b.onclick = () => {
   itemsEl.querySelectorAll(".chip").forEach(c => c.disabled = tool === "hammer");
 });
 $("start").onclick = startRound;
+$("share").onclick = shareScore;
 const soundBtn = document.getElementById("sound");
 soundBtn.onclick = () => { soundOn = !soundOn; soundBtn.setAttribute("aria-pressed", soundOn); soundBtn.textContent = soundOn ? "Sound on" : "Sound off"; };
 
-new ResizeObserver(layout).observe(stage);
-layout(); renderFace(); hud();
-requestAnimationFrame(frame);
+async function boot() {
+  best = await loadBest();
+  new ResizeObserver(layout).observe(stage);
+  layout(); renderFace(); hud();
+  requestAnimationFrame(frame);
+}
+if (FB) {
+  // Facebook shows its own loading screen until startGameAsync resolves.
+  FB.initializeAsync()
+    .then(() => { FB.setLoadingProgress(100); return FB.startGameAsync(); })
+    .then(boot, boot);
+} else boot();
 })();
 </script>

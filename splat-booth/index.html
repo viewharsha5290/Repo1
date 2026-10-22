@@ -4,7 +4,7 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Rubik:wght@400;600;700&display=swap">
-<style id="page-style">
+<style>
 /* Layout: one-screen carnival booth — score marquee on top, throwing range in the middle, item tray at the bottom. Single dark look by choice. */
 :root {
   --tent: #1d4b56;
@@ -14,8 +14,6 @@
   --gold: #ffc83d;
   --panel: #0f252b;
   --chip: #193840;
-  --silver: #c9d6d8;
-  --bronze: #d99a5e;
   --display: "Bungee", "Arial Black", Impact, sans-serif;
   --body: "Rubik", system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: dark;
@@ -91,37 +89,6 @@ canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-act
 .big { font-family: var(--display); font-size: 3.2rem; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
 .badge { font-family: var(--display); font-size: .85rem; letter-spacing: .06em; color: var(--panel); background: var(--gold); padding: 4px 10px; border-radius: 999px; }
 .card .btn { flex: none; width: 100%; padding: 12px; font-size: 1rem; margin-top: 6px; }
-.card .tip { color: var(--gold); font-weight: 600; }
-/* Hall of Fame */
-.overlay.hof { align-items: center; background: rgba(10, 26, 31, .8); }
-.hof .card { max-height: 100%; overflow-y: auto; align-items: stretch; }
-.hof h2 { text-align: center; }
-.hof-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.hof-list li {
-  display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
-  padding: 7px 10px; border-radius: 10px; background: var(--chip); text-align: left;
-}
-.hof-list .rank { font-family: var(--display); color: var(--muted); font-variant-numeric: tabular-nums; }
-.hof-list li:nth-child(1) .rank { color: var(--gold); }
-.hof-list li:nth-child(2) .rank { color: var(--silver); }
-.hof-list li:nth-child(3) .rank { color: var(--bronze); }
-.hof-list .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.hof-list .pts { font-family: var(--display); font-weight: 400; font-variant-numeric: tabular-nums; }
-.hof-list .del {
-  border: 0; border-radius: 8px; padding: 4px 8px; cursor: pointer;
-  background: transparent; color: var(--muted); font: 600 .75rem var(--body);
-}
-.hof-list .del[data-armed] { background: #ff7a5c; color: var(--panel); }
-.hof-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--chip); }
-.hof-form .hof-label { color: var(--ink); font-weight: 600; text-align: left; }
-.hof-row { display: flex; gap: 8px; }
-.hof-row input {
-  flex: 1; min-width: 0; padding: 10px; border-radius: 10px; border: 2px solid var(--chip);
-  background: var(--panel); color: var(--ink); font: 400 1rem var(--body);
-}
-.hof-row input#hofScore { flex: 0 0 6.5rem; }
-.hof-row input:focus-visible, .hof-list .del:focus-visible { outline: 3px solid var(--gold); outline-offset: 1px; }
-.hof-status { min-height: 1.2em; font-size: .85rem; text-align: left; }
 </style>
 
 <div class="app">
@@ -144,25 +111,6 @@ canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-act
         <p id="ovText">Pick a tool and splat the face as many times as you can before the clock runs out. Center hits score extra, and hits in a row build a combo.</p>
         <button class="btn primary" id="start">Start round</button>
         <button class="btn" id="share" hidden>Share score</button>
-        <p class="tip" id="hofTip" hidden></p>
-        <button class="btn" id="hofOpen" hidden>Hall of Fame</button>
-      </div>
-    </div>
-    <div class="overlay hof" id="hof" hidden>
-      <div class="card" role="dialog" aria-labelledby="hofTitle">
-        <h2 id="hofTitle">Hall of Fame</h2>
-        <ol class="hof-list" id="hofList"></ol>
-        <p id="hofEmpty">No scores yet. Play a round and send in your best score to get on the board.</p>
-        <form class="hof-form" id="hofForm" hidden>
-          <p class="hof-label">Add a score (only you can see this)</p>
-          <div class="hof-row">
-            <input id="hofName" maxlength="20" placeholder="Name" autocomplete="off" aria-label="Player name">
-            <input id="hofScore" type="number" min="1" max="99999" inputmode="numeric" placeholder="Score" aria-label="Score">
-          </div>
-          <button class="btn primary" type="submit" id="hofAdd">Add to Hall of Fame</button>
-          <p class="hof-status" id="hofStatus" role="status"></p>
-        </form>
-        <button class="btn" type="button" id="hofClose">Close</button>
       </div>
     </div>
   </main>
@@ -185,21 +133,8 @@ canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-act
   </footer>
 </div>
 
-<!-- Hall of Fame entries. The owner adds scores from the live page, which saves a new version
-     with this list filled in. Before republishing this file, copy the live list in here first,
-     or the board resets. -->
-<script type="application/json" id="hof-data">[]</script>
-
 <script>
 (() => {
-// Copy the page's own source before anything changes the DOM. Saving the Hall of Fame
-// rebuilds the full page from these pieces plus the updated list.
-const PAGE = {
-  head: [...document.querySelectorAll('link[href*="fonts.googleapis.com"]')].map(l => l.outerHTML).join("\n"),
-  style: (document.getElementById("page-style") || {}).outerHTML || "",
-  app: document.querySelector(".app").outerHTML,
-  script: document.currentScript ? document.currentScript.textContent : "",
-};
 const ITEMS = {
   tomato: { name: "Tomato", main: "#d4231b", light: "#f2563f", bits: "#f7d98d" },
   egg:    { name: "Egg",    main: "#f6f2e4", light: "#ffffff", bits: "#f7b500" },
@@ -655,7 +590,6 @@ function finishRound() {
   $("ovBadge").hidden = !isBest || state.score === 0;
   $("ovText").textContent = `${state.hits} hits from ${state.throws} throws (${acc}%). ` + (isBest ? "" : `High score: ${best}.`);
   $("start").textContent = "Play again";
-  updateHofPrompt();
   $("overlay").hidden = false; hud();
   $("start").focus();
 }
@@ -960,120 +894,7 @@ $("share").onclick = shareScore;
 const soundBtn = document.getElementById("sound");
 soundBtn.onclick = () => { soundOn = !soundOn; soundBtn.setAttribute("aria-pressed", soundOn); soundBtn.textContent = soundOn ? "Sound on" : "Sound off"; };
 
-// ---------- Hall of Fame ----------
-// The top 10 lives in the page itself (the hof-data block). Only the owner can add or remove
-// entries; each change saves a new version of the page that every viewer reloads to.
-const HOF_MAX = 10;
-const SKELETON = '<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,-apple-system,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style></head><body>';
-const HEAD = '<title>Splat Booth</title>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n<meta name="claude:viewport-fit-sides" content="cover">\n';
-let hof = [], isOwner = false, artifactApi = null;
-
-function cleanHof(list) {
-  if (!Array.isArray(list)) return [];
-  return list
-    .filter(e => e && typeof e.name === "string" && e.name.trim() && Number.isFinite(e.score) && e.score > 0)
-    .map(e => ({ name: e.name.trim().slice(0, 20), score: Math.min(99999, Math.round(e.score)), date: typeof e.date === "string" ? e.date.slice(0, 10) : "" }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, HOF_MAX);
-}
-try { hof = cleanHof(JSON.parse($("hof-data").textContent)); } catch (e) { hof = []; }
-
-const hofQualifies = s => s > 0 && (hof.length < HOF_MAX || s > hof[hof.length - 1].score);
-const hofRank = s => hof.filter(e => e.score >= s).length + 1;
-const hofStatus = msg => { $("hofStatus").textContent = msg; };
-
-function renderHof() {
-  const ol = $("hofList"); ol.textContent = "";
-  hof.forEach((e, i) => {
-    const li = document.createElement("li");
-    const rank = document.createElement("span"); rank.className = "rank"; rank.textContent = i + 1;
-    const who = document.createElement("span"); who.className = "who"; who.textContent = e.name;
-    const pts = document.createElement("b"); pts.className = "pts"; pts.textContent = e.score;
-    li.append(rank, who, pts);
-    if (isOwner) {
-      const del = document.createElement("button");
-      del.type = "button"; del.className = "del"; del.textContent = "Remove";
-      del.setAttribute("aria-label", "Remove " + e.name);
-      del.onclick = () => {
-        if (!del.dataset.armed) { del.dataset.armed = "1"; del.textContent = "Sure?"; return; }
-        saveHof(hof.filter((_, j) => j !== i));
-      };
-      li.append(del);
-    }
-    ol.append(li);
-  });
-  $("hofEmpty").hidden = hof.length > 0;
-  $("hofForm").hidden = !isOwner;
-  updateHofPrompt();
-}
-
-function updateHofPrompt() {
-  const open = $("hofOpen"), tip = $("hofTip");
-  if (FB) { open.hidden = true; tip.hidden = true; return; } // Facebook has its own scores
-  open.hidden = !(hof.length || isOwner);
-  const ranked = state.phase === "over" && hofQualifies(state.score);
-  tip.hidden = !ranked;
-  if (ranked) {
-    tip.textContent = isOwner
-      ? `That's #${hofRank(state.score)} on the Hall of Fame.`
-      : `That's #${hofRank(state.score)} on the Hall of Fame! Screenshot this and send it in to get on the board.`;
-  }
-  open.textContent = ranked && isOwner ? "Add to Hall of Fame" : "Hall of Fame";
-}
-
-function openHof() {
-  renderHof(); hofStatus("");
-  $("hof").hidden = false;
-  if (isOwner && state.phase === "over" && hofQualifies(state.score)) { $("hofScore").value = state.score; $("hofName").focus(); }
-  else $("hofClose").focus();
-}
-
-function buildPage(list) {
-  const json = JSON.stringify(list).replace(/</g, "\\u003c");
-  const end = "<" + "/script>";
-  return SKELETON + HEAD + PAGE.head + "\n" + PAGE.style + "\n\n" + PAGE.app + "\n\n" +
-    '<script type="application/json" id="hof-data">' + json + end + "\n\n<script>" + PAGE.script + end + "\n</body></html>";
-}
-
-async function saveHof(next) {
-  if (!artifactApi) { hofStatus("Saving isn't available here."); return; }
-  $("hofAdd").disabled = true; hofStatus("Saving…");
-  try {
-    await artifactApi.publish(buildPage(cleanHof(next)));
-    hofStatus("Saved. Updating the board…"); // the page reloads to the new version
-  } catch (err) {
-    $("hofAdd").disabled = false;
-    const code = err && err.code;
-    if (code === "conflict") hofStatus("The page just changed. Loading the latest version…");
-    else if (["not_writer", "not_granted", "not_declared", "consent_required", "capability_disabled", "capability_removed"].includes(code)) {
-      isOwner = false; renderHof();
-    } else if (code === "rate_limited") hofStatus("Too many saves in a row. Wait a minute, then try again.");
-    else hofStatus("Couldn't save. Check your connection and try again.");
-  }
-}
-
-$("hofOpen").onclick = openHof;
-$("hofClose").onclick = () => { $("hof").hidden = true; };
-$("hofForm").addEventListener("submit", e => {
-  e.preventDefault();
-  const name = $("hofName").value.trim().slice(0, 20), score = Math.round(Number($("hofScore").value));
-  if (!name || !(score > 0)) { hofStatus("Enter a name and a score above 0."); return; }
-  saveHof([...hof, { name, score, date: new Date().toISOString().slice(0, 10) }]);
-});
-
-// Owner controls appear only inside the Claude viewer, for the artifact's owner.
-async function checkOwner() {
-  if (!window.claude || typeof window.claude.use !== "function") return;
-  try {
-    const [user, art] = await Promise.all([window.claude.use("user"), window.claude.use("artifact")]);
-    artifactApi = art;
-    isOwner = !!(user && art && await user.isOwner());
-  } catch (e) { isOwner = false; }
-  renderHof();
-}
-
 async function boot() {
-  renderHof(); checkOwner();
   best = await loadBest();
   new ResizeObserver(layout).observe(stage);
   layout(); renderFace(); hud();

@@ -119,7 +119,7 @@ canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-act
       <button class="tool" id="tool-sling" data-tool="sling" aria-pressed="true">Slingshot</button>
       <button class="tool" id="tool-blaster" data-tool="blaster" aria-pressed="false">Blaster</button>
       <button class="tool" id="tool-hammer" data-tool="hammer" aria-pressed="false">Hammer</button>
-      <button class="tool" id="tool-plunger" data-tool="plunger" aria-pressed="false">Pie plunger</button>
+      <button class="tool" id="tool-plunger" data-tool="plunger" aria-pressed="false">Plunger</button>
       <button class="tool" id="tool-catapult" data-tool="catapult" aria-pressed="false">Catapult</button>
     </div>
     <div class="items" id="items" role="group" aria-label="Choose what to throw"></div>
@@ -147,12 +147,12 @@ const TOOLS = {
   sling:   { hit: 10, bull: 25, hint: "Drag down from the slingshot, aim, let go" },
   blaster: { hit: 5,  bull: 15, hint: "Tap where you want to shoot" },
   hammer:  { hit: 8,  bull: 15, hint: "Tap the face to bonk it" },
-  plunger: { hit: 12, bull: 30, hint: "Slide to line up, let go to fire the pie" },
+  plunger: { hit: 12, bull: 30, hint: "Slide to line up, let go to fire" },
   catapult:{ hit: 15, bull: 35, hint: "Hold to charge, slide to aim, let go" },
 };
 let tool = "sling", aim = -Math.PI / 2, recoil = 0, hammers = [];
-const plg = { x: 0, holding: false, phase: "idle", u: 0 };          // pie plunger
-const cat = { x: 0, charging: false, power: 0, dir: 1, arm: 0 };   // catapult
+const plg = { x: 0, holding: false, phase: "idle", u: 0, id: "pie" }; // plunger
+const cat = { x: 0, charging: false, power: 0, dir: 1, arm: 0, yaw: 0 }; // catapult
 
 const stage = document.getElementById("stage");
 const cv = document.getElementById("game");
@@ -494,14 +494,14 @@ const counterY = () => H - 46;
 const release = () => {
   if (plg.holding) {
     plg.holding = false;
-    if (state.phase === "playing") { plg.phase = "out"; plg.u = 0; reload = 0.5; sfx("boing"); }
+    if (state.phase === "playing") { plg.phase = "out"; plg.u = 0; plg.id = current; reload = 0.5; sfx("boing"); }
     return;
   }
   if (cat.charging) {
     cat.charging = false;
     if (state.phase !== "playing") return;
     const top = counterY() - 60, landY = top - cat.power * (top - H * 0.04);
-    shots.push({ id: current, tool: "catapult", sx: W / 2 + 11, sy: counterY() - 121, tx: cat.x, ty: landY, u: 0,
+    shots.push({ id: current, tool: "catapult", sx: W / 2 + cat.yaw, sy: counterY() - 112, tx: cat.x, ty: landY, u: 0,
       T: 0.8, arc: H * 0.32, spin: rand(-10, 10) });
     cat.arm = 1; reload = 0.6; sfx("thunk");
     return;
@@ -620,9 +620,10 @@ function frame(now) {
     if (cat.power >= 1) { cat.power = 1; cat.dir = -1; } else if (cat.power <= 0) { cat.power = 0; cat.dir = 1; }
   }
   cat.arm = Math.max(0, cat.arm - dt * 2.2);
+  if (cat.charging) cat.yaw = clamp((cat.x - W / 2) * 0.2, -24, 24);
   if (plg.phase === "out") {
     plg.u += dt / 0.16;
-    if (plg.u >= 1) { plg.u = 1; plg.phase = "back"; land({ id: "pie", tool: "plunger", tx: plg.x, ty: faceY() }); }
+    if (plg.u >= 1) { plg.u = 1; plg.phase = "back"; land({ id: plg.id, tool: "plunger", tx: plg.x, ty: faceY() }); }
   } else if (plg.phase === "back") {
     plg.u -= dt / 0.3;
     if (plg.u <= 0) { plg.u = 0; plg.phase = "idle"; }
@@ -774,31 +775,39 @@ function drawPlunger() {
   ctx.fillStyle = "#e0573b"; rrect(ctx, x - 22, by - 10, 44, 46, 8);
   ctx.fillStyle = "#ffc83d"; ctx.fillRect(x - 22, by + 4, 44, 6);
   ctx.fillStyle = "#9fb3b6"; ctx.beginPath(); ctx.ellipse(x, top, 24, 6, 0, 0, 7); ctx.fill();
-  if (plg.phase !== "back") drawItem(ctx, x, top - 8, 1.5, "pie", 0);
+  if (plg.phase !== "back") drawItem(ctx, x, top - 12, 1.4, plg.phase === "out" ? plg.id : current, 0);
 }
 
-// Wooden catapult. Holding winds the arm back while the power meter swings; letting go flings it.
+// Wooden catapult seen from behind, facing the target. The arm swings up and away from the
+// player toward the face; phi is the arm's tilt (0 = straight up, larger = pulled back toward you).
 function drawCatapult() {
-  const cx = W / 2, by = counterY(), px = cx, py = by - 52;
+  const cx = W / 2, by = counterY(), py = by - 40, L = 72;
   if (cat.charging) dashedLine(cat.x, by - 150, cat.x, 50);
-  const loadedA = Math.PI * 0.92, firedA = -Math.PI * 0.45;
+  const loadedPhi = 2.0 + (cat.charging ? cat.power * .3 : 0), firedPhi = -0.12;
   const swing = cat.arm > .75 ? (1 - cat.arm) / .25 : cat.arm / .75;
-  const a = loadedA + (firedA - loadedA) * swing + (cat.charging ? cat.power * .25 : 0);
-  ctx.save(); ctx.translate(px, py); ctx.rotate(a);
-  ctx.fillStyle = "#a5683d"; ctx.fillRect(0, -4, 70, 8);
-  ctx.fillStyle = "#6b3f26"; ctx.beginPath(); ctx.arc(70, -6, 14, 0, Math.PI); ctx.fill();
-  if (!reload) drawItem(ctx, 70, -10, 1, current, 0);
-  ctx.restore();
-  ctx.strokeStyle = "#6b3f26"; ctx.lineWidth = 8; ctx.lineCap = "round";
-  ctx.beginPath(); ctx.moveTo(cx - 22, by - 14); ctx.lineTo(px, py); ctx.lineTo(cx + 22, by - 14); ctx.stroke();
-  ctx.fillStyle = "#83502f"; rrect(ctx, cx - 50, by - 18, 100, 14, 4);
-  for (const wx of [cx - 34, cx + 34]) {
-    ctx.fillStyle = "#3b2416"; ctx.beginPath(); ctx.arc(wx, by + 2, 13, 0, 7); ctx.fill();
-    ctx.fillStyle = "#ffc83d"; ctx.beginPath(); ctx.arc(wx, by + 2, 4, 0, 7); ctx.fill();
+  const phi = loadedPhi + (firedPhi - loadedPhi) * swing;
+  const ex = cx + cat.yaw * Math.cos(phi), ey = py - L * Math.cos(phi), s = 1 + .35 * Math.sin(phi);
+  ctx.lineCap = "round";
+  // frame: two uprights joined by the stop bar the arm hits
+  ctx.strokeStyle = "#6b3f26"; ctx.lineWidth = 8;
+  ctx.beginPath(); ctx.moveTo(cx - 46, by - 8); ctx.lineTo(cx - 36, by - 116); ctx.moveTo(cx + 46, by - 8); ctx.lineTo(cx + 36, by - 116); ctx.stroke();
+  ctx.fillStyle = "#83502f"; rrect(ctx, cx - 44, by - 122, 88, 10, 4);
+  ctx.fillStyle = "#83502f"; rrect(ctx, cx - 54, by - 14, 108, 12, 4);
+  for (const wx of [cx - 56, cx + 56]) {
+    ctx.fillStyle = "#3b2416"; ctx.beginPath(); ctx.ellipse(wx, by + 2, 7, 16, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffc83d"; ctx.fillRect(wx - 1.5, by - 12, 3, 28);
   }
-  ctx.fillStyle = "#ffc83d"; ctx.beginPath(); ctx.arc(px, py, 5, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#3b2416"; ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.moveTo(cx - 42, py); ctx.lineTo(cx + 42, py); ctx.stroke();
+  // arm and bucket
+  ctx.strokeStyle = "#a5683d"; ctx.lineWidth = 9;
+  ctx.beginPath(); ctx.moveTo(cx, py); ctx.lineTo(ex, ey); ctx.stroke();
+  ctx.fillStyle = "#6b3f26"; ctx.beginPath(); ctx.ellipse(ex, ey, 16 * s, 9 * s, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = "#3b2416"; ctx.beginPath(); ctx.ellipse(ex, ey - 1, 11 * s, 5 * s, 0, 0, 7); ctx.fill();
+  if (!reload) drawItem(ctx, ex, ey - 8 * s, s, current, 0);
+  ctx.fillStyle = "#ffc83d"; ctx.beginPath(); ctx.arc(cx, py, 5, 0, 7); ctx.fill();
   if (cat.charging) {
-    const mx = cx + 64, my = by - 110, mh = 90;
+    const mx = cx + 74, my = by - 110, mh = 90;
     ctx.fillStyle = "rgba(15,37,43,.8)"; rrect(ctx, mx - 3, my - 3, 18, mh + 6, 6);
     ctx.fillStyle = cat.power > .85 ? "#ff7a5c" : "#ffc83d";
     rrect(ctx, mx, my + mh * (1 - cat.power), 12, mh * cat.power, 4);
@@ -853,7 +862,6 @@ document.getElementById("clean").onclick = cleanUp;
 document.querySelectorAll(".tool").forEach(b => b.onclick = () => {
   tool = b.dataset.tool; drag = null; aim = -Math.PI / 2; plg.holding = false; cat.charging = false;
   document.querySelectorAll(".tool").forEach(t => t.setAttribute("aria-pressed", t === b));
-  itemsEl.querySelectorAll(".chip").forEach(c => c.disabled = tool === "plunger");
 });
 $("start").onclick = startRound;
 $("share").onclick = shareScore;

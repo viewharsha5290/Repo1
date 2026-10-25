@@ -19,6 +19,8 @@
   color-scheme: dark;
 }
 html, body { height: 100%; }
+/* Facebook's in-app browser can inflate text sizes, which clipped the button labels. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 [hidden] { display: none !important; }
 body {
   background: var(--panel); color: var(--ink); font-family: var(--body);
@@ -55,12 +57,14 @@ canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-act
 .tools { min-width: 0; display: flex; gap: 3px; padding: 3px; border-radius: 12px; background: var(--chip); overflow-x: auto; scrollbar-width: none; }
 .tools::-webkit-scrollbar { display: none; }
 .tool {
-  flex: 1 0 auto; padding: 8px 5px; border: 0; border-radius: 9px; cursor: pointer; white-space: nowrap;
-  background: transparent; color: var(--muted); font: 600 .8rem var(--body);
+  flex: 1 0 auto; padding: 8px 4px; border: 0; border-radius: 9px; cursor: pointer; white-space: nowrap;
+  background: transparent; color: var(--muted); font: 600 clamp(.7rem, 3.3vw, .8rem) var(--body);
 }
 .tool[aria-pressed="true"] { background: var(--gold); color: var(--panel); }
 .tool:focus-visible { outline: 3px solid var(--ink); outline-offset: 1px; }
-.actions { display: flex; gap: 8px; }
+/* Buttons keep their full labels; on narrow screens the row wraps instead of clipping. */
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.actions .btn { flex: 1 1 auto; min-width: max-content; }
 .btn {
   flex: 1; display: inline-flex; align-items: center; justify-content: center;
   padding: 10px 8px; border-radius: 10px; border: 0; cursor: pointer;
@@ -944,13 +948,16 @@ soundBtn.onclick = () => { soundOn = !soundOn; soundBtn.setAttribute("aria-press
 
 // ---------- Facebook leaderboard ----------
 // Facebook stores and ranks the scores. The board must exist in the app dashboard under this
-// exact name (global, higher is better). Facebook keeps each player's best, so posting a lower
-// score changes nothing. Outside Facebook all of this stays hidden.
+// exact name (contextual, higher is better); Meta no longer offers global boards. A contextual
+// board ranks the players of one chat or group, so it only exists when the game was opened from
+// one. Facebook keeps each player's best, so posting a lower score changes nothing. In solo play
+// and outside Facebook all of this stays hidden.
 const BOARD = "splat_booth_best";
-const boardOn = () => fbHas("getLeaderboardAsync");
+function contextId() { try { return FB.context.getID() || null; } catch (e) { return null; } }
+const boardOn = () => fbHas("getLeaderboardAsync") && !!contextId();
 let boardPromise = null;
 function getBoard() {
-  if (!boardPromise) boardPromise = FB.getLeaderboardAsync(BOARD).catch(e => { boardPromise = null; throw e; });
+  if (!boardPromise) boardPromise = FB.getLeaderboardAsync(`${BOARD}.${contextId()}`).catch(e => { boardPromise = null; throw e; });
   return boardPromise;
 }
 function postScore(score) {

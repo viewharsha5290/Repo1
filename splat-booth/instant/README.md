@@ -6,7 +6,7 @@
 - It loads Facebook's Instant Games SDK (version 8.0) and starts the game when Facebook says it's ready.
 - The high score is saved to the player's Facebook game data, so it follows them across devices.
 - After a round, a **Share score** button posts a score card image. The card never includes the uploaded face, so nobody's photo gets shared.
-- **Leaderboard:** each round's score is posted to Facebook's leaderboard (Facebook keeps every player's best). The **Leaderboard** button shows the Top 10 and your own rank. With SDK 8.0 Facebook no longer gives games the players' names, so other rows show "Player" and your row shows "You".
+- **Leaderboard:** when the game is opened from a chat or group, each round's score is posted to that chat's leaderboard (Facebook keeps every player's best). The **Leaderboard** button shows the Top 10 and your own rank. Meta only offers per-chat ("contextual") boards now, so in solo play the button stays hidden. With SDK 8.0 Facebook no longer gives games the players' names, so other rows show "Player" and your row shows "You".
 - Fonts are bundled inside the zip, so the game loads nothing from outside Facebook.
 
 The browser version (`../index.html`) is the same game. It switches these features on only when it runs inside Facebook.
@@ -24,9 +24,8 @@ You'll need a computer for these steps.
 1. **Create a developer account** at developers.facebook.com (free) and verify it.
 2. **Create an app.** Choose the gaming / Instant Games option and name it "Splat Booth".
 3. **Apply to the Approved Partner Program.** This is a one-time application Meta requires before any Instant Game can go live.
-4. **Create the leaderboard.** In the app dashboard go to Instant Games → Leaderboards → Create, and enter:
+4. **Create the leaderboard.** In the app dashboard go to Use cases → Launch an Instant Game → Leaderboards, and under "Create contextual leaderboard" enter:
    - Name: `splat_booth_best` (exactly this, or the game can't find it)
-   - Type: global (not contextual)
    - Sort order: higher is better
    - Score format: numeric
 5. **Upload the bundle.** In the app dashboard go to Instant Games → Web Hosting, upload `splat-booth-instant.zip`, then click **Push to Testing**.
@@ -34,7 +33,7 @@ You'll need a computer for these steps.
    - Upload face opens the photo picker inside Facebook's app (this can't be tested outside Facebook)
    - the high score is still there after closing and reopening the game
    - Share score posts the score card
-   - after a round, the Leaderboard button shows your score and rank
+   - when opened from a chat or group, the Leaderboard button shows your score and rank after a round
 7. **Fill in the listing:** an icon, screenshots, a description, a category, and a **privacy policy URL** (required, because players can pick photos).
 8. **Submit for review.** Once it's approved, move the build from Testing to **Production**.
 
